@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>D3 Scatterplot Selector</title>
+  </head>
+
+  <style>
+  body {
+  font: 11px sans-serif;
+  }
+
+  h1 {
+    font-size: 64px;
+    font-weight: 300;
+    letter-spacing: -2px;
+    margin: .3em 0 .1em 0;
+  }
+
+  .axis path,
+  .axis line {
+    fill: none;
+    stroke: #000;
+    shape-rendering: crispEdges;
+  }
+
+  circle {
+    stroke: #000;
+    fill: rgb(31, 119, 180);
+  }
+
+  .selected {
+    fill:red;
+  }
+
+  rect.selection {
+      stroke          : gray;
+      stroke-dasharray: 4px;
+      stroke-opacity  : 0.5;
+      fill            : transparent;
+  }
+
+  button {
+    margin-left: 10px;
+  }
+  </style>
+  <body>
+    <h1>D3 Scatterplot Selector</h1>
+    <input type="file" id="uploader">
+    <br/>
+    <svg>
+      <g class="frame">
+        <g class="dots"/>
+        <g class="x axis"/>
+        <g class="y axis"/>
+      </g>
+    </svg>
+    <br/>
+  </body>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+  <script>
+  var WIDTH = 400, HEIGHT = 400,
+      margin = {top: 30, right: 20, bottom: 30, left: 40}
+
+  //Prepare file upload handler
+  var uploader = document.getElementById("uploader");
+  var reader = new FileReader();
+
+  reader.onload = function(e) {
+    var contents = e.target.result;
+    importDataset(contents);
+  };
+
+  uploader.addEventListener("change", function () {
+      var file = this.files[0];
+      reader.readAsText(file);
+    },
+    false);
+
+
+  //Generate mock data
+  var dataset = [];
+  var columns = ["uid","x","y"];
+  for (var uid = 0; uid<200; uid++) {
+    dataset.push([uid,Math.random()*200,Math.random()*200]);}
+
+  var svg = d3.select('svg')
+    .attr('width',WIDTH+margin.left+margin.right)
+    .attr('height',HEIGHT+margin.top+margin.bottom);
+  var frame = d3.select("g.frame")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+  //Update scatter plot with the generated data
+  //The same function will be called if user upload their data
+  refreshPlot();
+
+  //Handle mouse actions to select the data points
+  svg
+    .on('mousedown',initiateRectangle)
+    .on('mousemove',updateRectangle)
+    .on('mouseup',removeRectangle);
+
+  d3.select('body').append('button')
+    .text('Save selection as column')
+    .on('click',saveSelection);
+
+  d3.select('body').append('button')
+    .text('Export to CSV')
+    .on('click',exportDataset);
+
+  function refreshPlot() {
+    function nth(i) {return function(a) { return a[i];};}
+    var x = d3.scale.linear()
+      .domain(d3.extent(dataset.map(nth(1))))
+      .range([0,WIDTH]);
+    var y = d3.scale.linear()
+      .domain(d3.extent(dataset.map(nth(2))))
+      .range([HEIGHT,0]);
+    d3.select('g.x')
+      .attr("transform", "translate(0," + HEIGHT + ")")
+      .call(d3.svg.axis()
+      .scale(x)
+      .orient('bottom')
+      .ticks(4));
+    d3.select('g.y').call(d3.svg.axis()
+      .scale(y)
+      .orient('left')
+      .ticks(4));
+    svg.selectAll('circle').remove();
+    var points = svg.select('g.dots').
+      selectAll('circle').data(dataset).enter();
+    points.append('circle')
+      .attr('cx',function (d){return x(d[1]);})
+      .attr('cy',function (d){return y(d[2]);})
+      .attr('id',nth(0))
+      .attr('r',3.5);
+  }
+
+  function initiateRectangle(){
+    if (!d3.event.shiftKey) {
+      d3.selectAll('circle.selected').classed('selected',false);}
+    d3.event.preventDefault();
+    var p = d3.mouse(this);
+    p[0] -= margin.left;
+    p[1] -= margin.top;
+    frame.append('rect')
+      .attr({x0:p[0], y0: p[1], width:0, height:0,class:'selection'});
+  };
+
+  function updateRectangle(){
+    var p = d3.mouse(this);
+    p[0] -= margin.left;
+    p[1] -= margin.top;
+    var rect = frame.select('rect.selection');
+    if (rect.empty()) return;
+
+    var xs = [parseFloat(rect.attr('x0')),p[0]],
+        ys = [parseFloat(rect.attr('y0')),p[1]],
+        x1= d3.min(xs), y1= d3.min(ys),
+        x2= d3.max(xs), y2= d3.max(ys);
+    rect.attr({x:x1, y:y1, width: x2-x1, height: y2-y1});
+
+    frame.selectAll('circle').each(function(point,i) {
+      var circle = d3.select(this);
+      var cx = parseFloat(circle.attr('cx')),
+          cy = parseFloat(circle.attr('cy'));
+      if (x1<=cx && cx<=x2 && y1<=cy && cy<=y2) {
+        circle.classed('selected',true);
+      };
+    });
+  };
+
+  function removeRectangle(){
+    frame.selectAll('rect.selection').remove();
+  };
+
+  function saveSelection() {
+    columns.push("selection");
+    var i = dataset.length,
+        selectedIDs = new Array(i);
+    while (--i >= 0) {
+      selectedIDs[i] = 0;
+    }
+
+    frame.selectAll('circle.selected').each(function(point,i) {
+      selectedIDs[point[0]] = 1;
+    });
+
+    for (i=0;i<dataset.length;++i) {
+      dataset[i].push(selectedIDs[i]);
+    }
+  }
+
+  function exportDataset() {
+    var csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += columns.join(",")+"\n";
+    dataset.forEach(function(infoArray,index) {
+      dataString = infoArray.join(",");
+      csvContent += dataString+"\n";
+    });
+    window.open(encodeURI(csvContent));
+  }
+
+  function importDataset(csv) {
+    var data = d3.csv.parseRows(csv);
+    var validCols = [];
+    columns = ["uid"];
+    for (var j=0;j<data[1].length;++j) {
+      if (!isNaN(data[1][j])) {
+        validCols.push(j);
+        columns.push(data[0][j]);
+      }
+    }
+    dataset = [];
+    for (var i=1;i<data.length;++i) {
+      var row = [i];
+      for (var j=0;j<validCols.length;++j) {
+        row.push(parseFloat(data[i][validCols[j]]));
+      }
+      dataset.push(row);
+    };
+    refreshPlot();
+  }
+
+  </script>
+</html>
